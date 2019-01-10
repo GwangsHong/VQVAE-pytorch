@@ -1,0 +1,43 @@
+
+#Training
+batch_size: 4 #batch_size per a GPU
+data_root: './' #./ == vctk/raw/VCTK-Corpus
+start_epoch: 0
+num_epochs: 100
+checkpoint: #'/home/gshong/projects/unofficial-vqvae-pytorch/output_speech/0_checkpoint.pth'
+save_path: './speech_output'
+num_workers: 4
+train_val_split: 0.8
+lr: 0.0002
+
+#Audio
+sr: 16000 #Sampling rate
+res_type: 'kaiser_fast' #Resampling algorithm
+top_db: 20 #The threshold (in decibels) below reference to consider as silence
+length: 7680
+
+#Mu-law
+quantize: 256
+
+#Encoder
+input_dim: 256
+#dim == d
+
+#VQ
+d: 512
+k: 128
+beta: 0.25
+decay: 0.99
+
+#Wavenet
+n_loop: 3
+n_layer: 10
+filter_size: 2
+residual_channels: 512
+dilated_channels: 512
+skip_channels: 256
+global_condition_dim: 128
+local_condition_dim: 512
+
+
+

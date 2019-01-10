@@ -1,0 +1,23 @@
+
+#Training
+batch_size: 512 #batch_size per a GPU
+data_root: './' #./ == data/cifar-10-batches-py
+start_epoch: 0
+num_epochs: 100
+checkpoint: #'/home/gshong/projects/unofficial-vqvae-pytorch/output_speech/0_checkpoint.pth'
+save_path: './img_output'
+num_workers: 4
+lr: 0.0002
+
+#VQ
+d: 64
+k: 512
+beta: 0.25
+decay: 0.99
+
+#network
+n_layers: 2
+residual_channels: 32
+dim: 128
+
+
