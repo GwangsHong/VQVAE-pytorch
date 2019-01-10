@@ -1,5 +1,5 @@
 import torch
-from models import Encoder, VectorQuantizer, ConditionEmbedding, WaveNet
+from models import SpeechEncoder, VectorQuantizer, ConditionEmbedding, WaveNet
 import numpy as np
 from util import mu_law_decode ,get_config
 import librosa
@@ -39,7 +39,7 @@ if __name__ =='__main__':
 
     #models
     # models
-    encoder = Encoder(params['d'])
+    encoder = SpeechEncoder(params['d'])
     decoder = WaveNet(params['n_loop'],
                       params['n_layer'],
                       params['filter_size'],
