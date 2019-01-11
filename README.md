@@ -28,6 +28,7 @@ python train.py --config confgs/image_cifar10.yaml
 ```
 
 ## To do
+- [ ] Fix bug for EMA algorithm 
 - [ ] Multi-GPUs for generating
 - [ ] Fast generating algorithm
 - [ ] Upload results 
