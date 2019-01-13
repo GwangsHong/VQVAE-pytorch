@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class ResidualBlock(nn.Module):
     def __init__(self,dim_input, dim_hiddens, dim_residual_hiddens):
         super(ResidualBlock, self).__init__()
@@ -163,7 +164,7 @@ class VectorQuantizer(nn.Module):
 
         self.dtype = dtype
 
-        # for EMA
+        #for EMA
         self.register_buffer('ema_cluster_size', torch.zeros(embedding_k))
         self.ema_w = nn.Parameter(torch.Tensor(embedding_k, self.embedding_d))
         self.ema_w.data.normal_()
@@ -215,219 +216,28 @@ class VectorQuantizer(nn.Module):
         # convert quantized from BHWC -> BCHW
         return loss, quantized.permute(0, 3, 1, 2).contiguous(), perplexity, encodings
 
-class SpeechResidualblock(nn.Module):
-    def __init__(self, filter_size, dilation,
-                 residual_channels, dilated_channels, skip_channels,
-                 condition_dim):
-        super(SpeechResidualblock, self).__init__()
-        self.conv = nn.Conv2d(residual_channels, dilated_channels,
-                              kernel_size=(filter_size, 1),
-                              padding=(dilation * (filter_size - 1), 0),
-                              dilation=(dilation, 1))
-        self.condition_proj = nn.Conv2d(condition_dim, dilated_channels, 1)
-        self.res = nn.Conv2d(dilated_channels // 2, residual_channels, 1)
-        self.skip = nn.Conv2d(dilated_channels // 2, skip_channels, 1)
-
-        self.filter_size = filter_size
-        self.dilation = dilation
-        self.residual_channels = residual_channels
-        self.condition_dim = condition_dim
-
-    def init(self, batch, dtype):
-        self.queue = torch.zeros(batch,self.residual_channels,self.dilation * (self.filter_size - 1) + 1, 1).type(dtype)
-        self.condition_queue = torch.zeros(batch,self.condition_dim, 1, 1).type(dtype)
-        self.conv.padding = (0, 0)
-
-
-    def forward(self, x, condition):
-
-        length = x.shape[2]
-        # Dropout
-
-        h = x
-        # Dilated conv
-        h = self.conv(h)
-        h = h[:, :, :length]
-
-        # condition
-        h += self.condition_proj(condition)
-
-        # Gated activation units
-        # tanh_z, sig_z = F.split_axis(h, 2, axis=1)
-        tanh_z, sig_z = torch.chunk(h, 2, dim=1)
-        z = torch.tanh(tanh_z) * torch.sigmoid(sig_z)
-
-        # Projection
-        if x.shape[2] == z.shape[2]:
-            residual = self.res(z) + x
-        else:
-            residual = self.res(z) + x[:, :, -1:]
-        skip_conenection = self.skip(z)
-
-        return residual, skip_conenection
-
-    def pop(self):
-        return self.forward(self.queue, self.condition_queue)
-
-    def push(self, x, condition):
-        #self.queue = torch.cat([self.queue[:, :, 1:], x], dim=2) BUG
-        self.queue.transpose(1,2).transpose(0,1)[-1] = x.transpose(1,2).transpose(0,1)[0]
-
-        # self.condition_queue = torch.cat(
-        #     [self.condition_queue[:, :, 1:], condition], dim=2) BUG
-        self.condition_queue.transpose(1,2).transpose(0,1)[-1] = condition.transpose(1,2).transpose(0,1)[0]
-
-
-class SpeechResidualNet(nn.Module):
-    def __init__(self, n_loop, n_layer, filter_size,
-                 residual_channels, dilated_channels, skip_channels,
-                 condition_dim):
-        super(SpeechResidualNet, self).__init__()
-        self.dilations = [2 ** i for i in range(n_layer)] * n_loop
-
-        self.residual_blocks = nn.ModuleList()
-        for dilation in self.dilations:
-            self.residual_blocks += [SpeechResidualblock(filter_size,
-                                                   dilation,
-                                                   residual_channels,
-                                                   dilated_channels,
-                                                   skip_channels,
-                                                   condition_dim)]
-        self.residual_channels = residual_channels
-        self.condition_dim = condition_dim
-        self.filter_size = filter_size
-    def init(self, batch, dtype):
-        for i in range(len(self.dilations)):
-            self.residual_blocks[i].init(batch, dtype)
-
-
-
-    def forward(self, x, condition):
-        for i in range(len(self.dilations)):
-            x, skip = self.residual_blocks[i](x, condition)
-            if i == 0:
-                skip_connections = skip
-            else:
-                skip_connections += skip
-        return skip_connections
-
-    def generate(self, x, condition):
-        for i in range(len(self.dilations)):
-            self.residual_blocks[i].push(x,condition)
-            x, skip = self.residual_blocks[i].pop()
-            if i == 0:
-                skip_connections = skip
-            else:
-                skip_connections += skip
-        return skip_connections
-
-
-class WaveNet(nn.Module):
-    def __init__(self, n_loop, n_layer, filter_size, input_dim,
-                 residual_channels, dilated_channels, skip_channels,
-                 quantize,condition_dim):
-        super(WaveNet, self).__init__()
-
-        self.embed = nn.Conv2d(input_dim, residual_channels, kernel_size=(2, 1), padding=(1, 0))
-
-        self.resnet = SpeechResidualNet(
-            n_loop, n_layer, filter_size,
-            residual_channels, dilated_channels, skip_channels,
-            condition_dim)
-        self.proj1 = nn.Conv2d(skip_channels, skip_channels, 1)
-
-        output_dim = quantize
-        self.proj2 = nn.Conv2d(skip_channels, output_dim, 1)
-
-        self.input_dim = input_dim
-        self.quantize = quantize
-        self.skip_channels = skip_channels
-
-    def init(self, batch, dtype=torch.cuda.FloatTensor):
-
-        self.resnet.init(batch, dtype)
-        self.embed.padding = (0,0)
-        self.embed_queue = torch.zeros(batch, self.input_dim, 2, 1).type(dtype)
-        self.proj1_queue = torch.zeros(batch, self.skip_channels, 1, 1).type(dtype)
-        self.proj2_queue = torch.zeros(batch, self.skip_channels, 1, 1).type(dtype)
-
-
-    def forward(self, x, condition):
-        length = x.shape[2]
-        x = self.embed(x)
-        x = x[:, :, :length, :]
-
-        # Residual & Skip-conenection
-        z = F.relu(self.resnet(x, condition))
-
-        # Output
-        z = F.relu(self.proj1(z))
-        y = self.proj2(z)
-
-        return y
-
-    def generate(self, x, condition):
-
-        self.embed_queue.transpose(1,2).transpose(0,1)[-1] = x.transpose(1,2).transpose(0,1)[0]
-        #self.embed_queue = torch.cat([self.embed_queue[:, :, 1:], x], dim=2) BUG
-        x = self.embed(self.embed_queue)
-
-        x = F.relu(self.resnet.generate(x, condition))
-        #
-        self.proj1_queue.transpose(1, 2).transpose(0,1)[-1] = x.transpose(1, 2).transpose(0,1)[0]
-        #self.proj1_queue = torch.cat([self.proj1_queue[:, :, 1:], x], dim=2) BUG
-        x = F.relu(self.proj1(self.proj1_queue))
-
-        self.proj2_queue.transpose(1, 2).transpose(0,1)[-1] = x.transpose(1, 2).transpose(0,1)[0]
-        #self.proj2_queue = torch.cat([self.proj2_queue[:, :, 1:], x], dim=2) BUG
-        x = self.proj2(self.proj2_queue)
-        return x
 
 class SpeechVQVAE(nn.Module):
-    def __init__(self, encoder, decoder, condition_embed, vq):
+    def __init__(self, encoder, decoder, vq):
         super(SpeechVQVAE, self).__init__()
         self.encoder = encoder
         self.vq = vq
         self.decoder = decoder
-        self.condition_embed = condition_embed
         self.loss_func = nn.CrossEntropyLoss()
 
     def forward(self, x_enc, x_dec, global_condition, t):
         z = self.encoder(x_enc)
         loss2, quantized, perplexity, _ = self.vq(z)
         local_condition = quantized
-        condition = self.condition_embed(local_condition,global_condition)
-        y = self.decoder(x_dec,condition)
+        local_condition = local_condition.squeeze(-1)
+        x_dec = x_dec.squeeze(-1)
+        y = self.decoder(x_dec,local_condition,global_condition)
+        y = y.unsqueeze(-1)
         loss1 = self.loss_func(y,t)
         loss = loss1+ loss2
 
         return loss, y
 
-if __name__ == '__main__':
 
-    from util import get_config
-    param_path = 'configs/speech_vctk.yaml'
-    params = get_config(param_path)
-
-    n_speakers = 109
-
-    encoder = SpeechEncoder(params['d'])
-    wavenet = WaveNet(
-        params['n_loop'], params['n_layer'], params['filter_size'], params['input_dim'],
-        params['residual_channels'], params['dilated_channels'], params['skip_channels'],
-        params['quantize'], params['local_condition_dim'] + params['global_condition_dim'])
-    condition_embed = ConditionEmbedding(n_speakers, params['global_condition_dim'],
-                                         params['local_condition_dim'])
-    vq = VectorQuantizer(params['k'],params['d'],params['beta'],torch.FloatTensor)
-    model = SpeechVQVAE(encoder, wavenet, condition_embed, vq)
-
-    x_enc = torch.FloatTensor(params['batch_size'],1,params['length'],1).random_(-1,1)
-    x_dec = torch.FloatTensor(params['batch_size'],params['quantize'],params['length'],1)
-    global_condition = torch.LongTensor(params['batch_size']).random_(0,10)
-    t = torch.LongTensor(params['batch_size'],params['length'],1).random_(0,256)
-
-    loss = model(x_enc,x_dec,global_condition,t)
-
-    print(loss)
 
 
