@@ -8,7 +8,8 @@ import shutil
 from torch.utils.data import DataLoader
 from dataset import VCTKDataset
 from vctk import VCTK
-from models import SpeechEncoder, ConditionEmbedding, WaveNet,SpeechVQVAE, VectorQuantizer, Encoder, Decoder, VQVAE
+from models import Encoder, Decoder, SpeechEncoder, VQVAE, VectorQuantizer,SpeechVQVAE
+from wavenet_vocoder.wavenet import WaveNet
 from tqdm import tqdm
 import librosa
 import numpy as np
@@ -38,20 +39,22 @@ def train_VCTK(opt):
 
     # models
     encoder = SpeechEncoder(params['d'])
-    decoder = WaveNet(params['n_loop'],
-                      params['n_layer'],
-                      params['filter_size'],
-                      params['input_dim'],
+    decoder = WaveNet(params['quantize'],
+                      params['n_layers'],
+                      params['n_loop'],
                       params['residual_channels'],
-                      params['dilated_channels'],
-                      params['skip_channels'],
-                      params['quantize'],
-                      params['local_condition_dim'] + params['global_condition_dim'])
-    condition_emb = ConditionEmbedding(len(train_dataset.speaker_dic), params['global_condition_dim'],
-                                       params['local_condition_dim'])
+                      params['gate_channels'],
+                      params['skip_out_channels'],
+                      params['filter_size'],
+                      cin_channels=params['local_condition_dim'],
+                      gin_channels=params['global_condition_dim'],
+                      n_speakers=len(train_dataset.speaker_dic),
+                      upsample_conditional_features=True,
+                      upsample_scales=[2, 2, 2, 2, 2, 2]) # 64 downsamples
+
     vq = VectorQuantizer(params['k'], params['d'], params['beta'], params['decay'], TensorType)
 
-    model = SpeechVQVAE(encoder, decoder, condition_emb, vq)
+    model = SpeechVQVAE(encoder, decoder, vq)
 
     if params['checkpoint'] != None:
         checkpoint = torch.load(params['checkpoint'])
@@ -59,7 +62,6 @@ def train_VCTK(opt):
         params['start_epoch'] = checkpoint['epoch']
         encoder.load_state_dict(checkpoint['encoder'])
         decoder.load_state_dict(checkpoint['decoder'])
-        condition_emb.load_state_dict(checkpoint['condition_emb'])
         vq.load_state_dict(checkpoint['vq'])
 
     if cuda:
@@ -105,8 +107,7 @@ def train_VCTK(opt):
         torch.save({'epoch': epoch,
                     'encoder': encoder.state_dict(),
                     'decoder': decoder.state_dict(),
-                    'vq': vq.state_dict(),
-                    'condition_emb': condition_emb.state_dict()
+                    'vq': vq.state_dict()
                     }, os.path.join(save_path, '{}_checkpoint.pth'.format(epoch)))
 
 def train_CIFAR10(opt):
