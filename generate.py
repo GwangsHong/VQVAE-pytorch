@@ -20,9 +20,9 @@ def wavegen(model,length=None, c=None, g=None, initial_input=None,
         model (nn.Module) : WaveNet decoder
         length (int): Time steps to generate. If conditinlal features are given,
           then this is determined by the feature size.
-        c (numpy.ndarray): Conditional features, of shape T x C
-        g (scaler): Speaker ID
-        initial_value (int) : initial_value for the WaveNet decoder.
+        c (Tensor): Conditional features, of shape B x C x T
+        g (Tensor): Speaker ID
+        initial_value (Tensor) : initial_value for the WaveNet decoder.
         fast (Bool): Whether to remove weight normalization or not.
         tqdm (lambda): tqdm
 
