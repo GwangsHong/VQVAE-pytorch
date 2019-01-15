@@ -72,6 +72,7 @@ def train_VCTK(opt):
 
     for epoch in range(params['start_epoch'], params['num_epochs']):
         train_bar = tqdm(train_loader)
+        model.train()
         for data in train_bar:
             x_enc, x_dec, speaker_id, quantized = data
             if cuda:
@@ -86,23 +87,24 @@ def train_VCTK(opt):
 
         model.eval()
         data_val = next(iter(val_loader))
-        x_enc_val, x_dec_val, speaker_id_val, quantized_val = data_val
-        if cuda:
-            x_enc_val, x_dec_val, speaker_id_val, quantized_val = x_enc_val.cuda(), x_dec_val.cuda(), speaker_id_val.cuda(), quantized_val.cuda()
-        loss_val, out = model(x_enc_val, x_dec_val, speaker_id_val, quantized_val)
+        with torch.no_grad():
+            x_enc_val, x_dec_val, speaker_id_val, quantized_val = data_val
+            if cuda:
+                x_enc_val, x_dec_val, speaker_id_val, quantized_val = x_enc_val.cuda(), x_dec_val.cuda(), speaker_id_val.cuda(), quantized_val.cuda()
+            _, out = model(x_enc_val, x_dec_val, speaker_id_val, quantized_val)
 
-        output = out.argmax(dim=1).detach().cpu().numpy().squeeze()
-        input_mu = x_dec_val.argmax(dim=1).detach().cpu().numpy().squeeze()
-        input = x_enc_val.detach().cpu().numpy().squeeze()
+            output = out.argmax(dim=1).detach().cpu().numpy().squeeze()
+            input_mu = x_dec_val.argmax(dim=1).detach().cpu().numpy().squeeze()
+            input = x_enc_val.detach().cpu().numpy().squeeze()
 
-        output = mu_law_decode(output)
-        input_mu = mu_law_decode(input_mu)
+            output = mu_law_decode(output)
+            input_mu = mu_law_decode(input_mu)
 
-        librosa.output.write_wav(os.path.join(save_path, '{}_output.wav'.format(epoch)), output, params['sr'])
-        librosa.output.write_wav(os.path.join(save_path, '{}_input_mu.wav'.format(epoch)), input_mu, params['sr'])
-        librosa.output.write_wav(os.path.join(save_path, '{}_input.wav'.format(epoch)), input, params['sr'])
+            librosa.output.write_wav(os.path.join(save_path, '{}_output.wav'.format(epoch)), output, params['sr'])
+            librosa.output.write_wav(os.path.join(save_path, '{}_input_mu.wav'.format(epoch)), input_mu, params['sr'])
+            librosa.output.write_wav(os.path.join(save_path, '{}_input.wav'.format(epoch)), input, params['sr'])
 
-        model.train()
+
 
         torch.save({'epoch': epoch,
                     'encoder': encoder.state_dict(),
